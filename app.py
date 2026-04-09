@@ -28,79 +28,7 @@ def speak(text):
     components.html(js, height=0)
 
 
-# --- STT COMPONENT INJECTION ---
-_STT_DIR = os.path.join(os.path.dirname(__file__), "stt_component_v7")
-if not os.path.exists(_STT_DIR):
-    os.makedirs(_STT_DIR)
-
-_HTML_CONTENT = """<!DOCTYPE html>
-<html>
-  <head>
-    <script src="https://cdn.jsdelivr.net/npm/streamlit-component-lib@1.3.0/dist/streamlit.js"></script>
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap');
-      body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
-      button {
-        width: 100%; height: 140px; font-size: 2.5rem; background-color: #ffffff;
-        border: 4px solid #e2e8f0; border-radius: 24px; font-weight: 800; cursor: pointer; color: #1e293b;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.06); transition: all 0.2s; font-family: 'Nunito', sans-serif;
-      }
-      button:hover { background-color: #f1f8ff; box-shadow: 0 12px 30px rgba(59,130,246,0.15); transform: translateY(-3px); border-color: #3b82f6; }
-    </style>
-  </head>
-  <body>
-    <button id="stt-btn">🎤 Tap to Speak</button>
-    <script>
-      function onRender(event) { Streamlit.setFrameHeight(160); }
-      Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-      Streamlit.setComponentReady();
-      
-      const btn = document.getElementById("stt-btn");
-      btn.onclick = async function() {
-          try {
-              let targetSpeech = window.SpeechRecognition || window.webkitSpeechRecognition;
-              
-              // Streamlit iframes natively block microphone permissions. 
-              // We explicitly bypass the iframe sandbox by grabbing the parent window's Speech API!
-              try {
-                  if (window.parent && (window.parent.SpeechRecognition || window.parent.webkitSpeechRecognition)) {
-                       targetSpeech = window.parent.SpeechRecognition || window.parent.webkitSpeechRecognition;
-                  }
-              } catch(e) {} // Ignore cross-origin sandboxing just in case
-              
-              if (!targetSpeech) {
-                  Streamlit.setComponentValue("ERROR_NOT_SUPPORTED");
-                  return;
-              }
-              const recognition = new targetSpeech();
-              recognition.onresult = function(event) {
-                  const text = event.results[0][0].transcript;
-                  btn.innerText = "⭐ Captured!";
-                  Streamlit.setComponentValue(text);
-              };
-              recognition.onerror = function(event) {
-                  btn.innerText = "❌ Mic Error! Check Permissions";
-              };
-              recognition.onspeechend = function() { recognition.stop(); };
-              recognition.start(); // This triggers the top-level Browser popup securely!
-              btn.innerText = "🎧 Listening... (Speak Now)";
-              setTimeout(() => { btn.innerText = "🎤 Tap to Speak"; }, 6000);
-          } catch(err) {
-              btn.innerText = "❌ " + err.message;
-          }
-      };
-    </script>
-  </body>
-</html>
-"""
-
-_FILE_PATH = os.path.join(_STT_DIR, "index.html")
-# Write html aggressively
-with open(_FILE_PATH, "w", encoding="utf-8") as f:
-    f.write(_HTML_CONTENT)
-
-# Bursting cache dynamically
-speech_to_text = components.declare_component("speech_to_text_v7", path=_STT_DIR)
+# --- COMPONENT LOGIC REMOVED IN FAVOR OF SIMULATED TEXT INPUT ---
 
 
 # Playful Kids CSS Theme
@@ -301,16 +229,22 @@ def render_standard_mode():
             st.rerun()
 
     # Voice Dictation block above the rows
-    st.markdown("<div class='kids-header'>🎙️ Quick Voice Entry</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #64748b;'>Speak exactly like: 'Rahul, 12 years, intermediate, exam preparation, 1 GB data'</p>", unsafe_allow_html=True)
+    st.markdown("<div class='kids-header'>🎤 Voice Command Input (Simulated)</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #64748b;'>Enter exact simulation commands like: 'Rahul, 12 years, intermediate, exam preparation, 1 GB data'</p>", unsafe_allow_html=True)
     
-    # We use a container to restrict width of microphone
-    mic_cols = st.columns([1, 4])
-    with mic_cols[0]:
-        voice_dict_id = st.session_state.get('stt_dict_key', 0)
-        transcript = speech_to_text(key=f"voice_dict_{voice_dict_id}")
+    with st.container(border=True):
+        sim_col1, sim_col2 = st.columns([3, 1])
+        with sim_col1:
+            voice_dict_id = st.session_state.get('stt_dict_key', 0)
+            transcript_input = st.text_input("Simulate Voice Text", placeholder="e.g. Rahul 12 intermediate exam 1GB", label_visibility="collapsed", key=f"voice_sim_{voice_dict_id}")
+        with sim_col2:
+            submit_sim = st.button("Simulate Voice Input", type="primary", use_container_width=True)
+            
+    transcript = transcript_input if submit_sim and transcript_input.strip() else None
         
-    if transcript and transcript != "ERROR_NOT_SUPPORTED":
+    if transcript:
+        with st.spinner("Processing Simulated Voice..."):
+            time.sleep(1.0)
         import re
         t_clean = transcript.lower().replace(",", " ").replace(".", " ")
         
@@ -534,14 +468,20 @@ def render_a11y_mode():
             st.session_state.a11y_mode = False
             st.rerun()
 
-    st.markdown("<h3>📱 Blind Interface: Tap the giant microphone anywhere below to issue a command blindly.</h3>", unsafe_allow_html=True)
-    st.markdown("<h4 style='color:#64748b;'>🗣️ Valid Voice Commands: 'Begin', 'Calculate', 'Clear', 'Exit'</h4>", unsafe_allow_html=True)
+    st.markdown("<h3>💻 Accessibility Keyboard Fallback: Enter your simulated voice string below to issue a command globally.</h3>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color:#64748b;'>💬 Valid Simulation Commands: 'Begin', 'Calculate', 'Clear', 'Exit'</h4>", unsafe_allow_html=True)
 
     voice_global_id = st.session_state.get('stt_global_key', 0)
-    # The true unified command listener:
-    transcript = speech_to_text(key=f"voice_global_{voice_global_id}")
+    with st.container(border=True):
+        sim_a_col1, sim_a_col2 = st.columns([3, 1])
+        with sim_a_col1:
+            transcript_input = st.text_input("A11y Sim", placeholder="e.g. Begin", label_visibility="collapsed", key=f"voice_a11y_sim_{voice_global_id}")
+        with sim_a_col2:
+            submit_sim_a = st.button("Simulate Command", type="primary", use_container_width=True)
+            
+    transcript = transcript_input if submit_sim_a and transcript_input.strip() else None
 
-    if transcript and transcript != "ERROR_NOT_SUPPORTED":
+    if transcript:
         t = transcript.lower()
         processed = False
         
