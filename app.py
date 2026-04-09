@@ -29,7 +29,7 @@ def speak(text):
 
 
 # --- STT COMPONENT INJECTION ---
-_STT_DIR = os.path.join(os.path.dirname(__file__), "stt_component_v2")
+_STT_DIR = os.path.join(os.path.dirname(__file__), "stt_component_v6")
 if not os.path.exists(_STT_DIR):
     os.makedirs(_STT_DIR)
 
@@ -95,10 +95,12 @@ _HTML_CONTENT = """<!DOCTYPE html>
 """
 
 _FILE_PATH = os.path.join(_STT_DIR, "index.html")
+# Write html aggressively
 with open(_FILE_PATH, "w", encoding="utf-8") as f:
     f.write(_HTML_CONTENT)
 
-speech_to_text = components.declare_component("speech_to_text_v2", path=_STT_DIR)
+# Bursting cache dynamically
+speech_to_text = components.declare_component("speech_to_text", path=_STT_DIR)
 
 
 # Playful Kids CSS Theme
@@ -248,6 +250,7 @@ def generate_ai_insights(results, global_used_mb, total_mb, low_data_mode):
     elif score > 0:
         recs.append("Great job managing data fairly! ⭐")
     return score, recs
+
 # --- STATE ---
 if 'students' not in st.session_state: st.session_state.students = []
 if 'a11y_mode' not in st.session_state: st.session_state.a11y_mode = False
@@ -448,100 +451,64 @@ def render_a11y_mode():
         </style>
     """, unsafe_allow_html=True)
     
-    st.markdown("<h1>♿ Voice Setup Wizard</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>♿ Auto-Voice Command Center</h1>", unsafe_allow_html=True)
     
     col_left, _, col_right = st.columns([1, 4, 1])
     with col_left:
         if st.button("❌ Exit Wizard", key="exit_btn", type="secondary"):
             st.session_state.a11y_mode = False
             st.rerun()
-            
-    st.divider()
-    step = st.session_state.a11y_step
-    
-    if step == 0:
-        if 'spoken_welcome' not in st.session_state:
-            st.session_state.speak_queue = "Welcome to the Voice Wizard. Tap the giant button below to begin."
-            st.session_state.spoken_welcome = True
-            st.rerun()
-            
-        if st.button("🚀 Begin Setup", type="primary", use_container_width=True):
+
+    st.markdown("<h3>📱 Blind Interface: Tap the giant microphone anywhere below to issue a command blindly.</h3>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color:#64748b;'>🗣️ Valid Voice Commands: 'Begin', 'Calculate', 'Clear', 'Exit'</h4>", unsafe_allow_html=True)
+
+    voice_global_id = st.session_state.get('stt_global_key', 0)
+    # The true unified command listener:
+    transcript = speech_to_text(key=f"voice_global_{voice_global_id}")
+
+    if transcript and transcript != "ERROR_NOT_SUPPORTED":
+        t = transcript.lower()
+        processed = False
+        
+        if "exit" in t:
+            st.session_state.a11y_mode = False
+            processed = True
+        elif "calculate" in t or "result" in t:
+            st.session_state.a11y_step = 3
+            processed = True
+        elif "clear" in t or "start over" in t:
+            st.session_state.students = []
+            st.session_state.a11y_step = 0
+            processed = True
+        elif "begin" in t or "start" in t:
             st.session_state.a11y_step = 1
-            st.session_state.speak_queue = "Step one. Tap a preset limit, or speak your absolute data budget aloud by clicking the microphone button."
-            st.rerun()
-            
-    elif step == 1:
-        st.markdown("<h2>Choose your Data Internet Rule:</h2>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("500 MB", type="primary", use_container_width=True):
-                st.session_state.a11y_budget = 500
-                st.session_state.a11y_step = 2
-                st.session_state.speak_queue = "Limit set. Step two. Use the microphone to dictate your student's profile."
-                st.rerun()
-        with col2:
-            if st.button("1 GB", type="primary", use_container_width=True):
-                st.session_state.a11y_budget = 1024
-                st.session_state.a11y_step = 2
-                st.session_state.speak_queue = "Limit set. Step two. Use the microphone to dictate your student's profile."
-                st.rerun()
-        with col3:
-            if st.button("2 GB", type="primary", use_container_width=True):
-                st.session_state.a11y_budget = 2048
-                st.session_state.a11y_step = 2
-                st.session_state.speak_queue = "Limit set. Step two. Use the microphone to dictate your student's profile."
-                st.rerun()
-                
-        st.markdown("<p style='text-align: center; color: gray;'>Say things like: '1500 mb' or '2 gb'</p>", unsafe_allow_html=True)
-        
-        voice_budget_id = st.session_state.get('stt_b_key', 0)
-        transcript = speech_to_text(key=f"voice_budget_{voice_budget_id}")
-        
-        if transcript:
-            if transcript == "ERROR_NOT_SUPPORTED": st.error("Browser unsupported.")
-            else:
-                t = transcript.lower()
+            st.session_state.speak_queue = "Step one. Speak your budget limit securely."
+            processed = True
+        else:
+            # Context-sensitive parsing based on step
+            if st.session_state.a11y_step == 1:
                 nums = ''.join(filter(str.isdigit, t))
                 if nums:
                     val = int(nums)
                     budget = val * 1024 if "gb" in t else val
                     st.session_state.a11y_budget = budget
                     st.session_state.a11y_step = 2
-                    st.session_state.speak_queue = f"Understood. Budget set to {budget} megabytes. Step two. Tell me about the student."
-                    st.session_state.stt_b_key = voice_budget_id + 1
-                    st.rerun()
+                    st.session_state.speak_queue = f"Understood. Budget set to {budget} megabytes. Tell me about the student."
+                    processed = True
+            elif st.session_state.a11y_step == 2:
+                import re
+                t_clean = t.replace(".", "").replace(",", "")
+                m = re.search(r'(name is|named|name|student|friend|add)\s+([a-zA-Z]+)', t_clean)
+                if m:
+                    name = m.group(2).capitalize()
                 else:
-                    st.session_state.speak_queue = "I didn't capture a numeric budget limit. Tap microphone to attempt again."
-                    st.session_state.stt_b_key = voice_budget_id + 1
-                    st.rerun()
-
-    elif step == 2:
-        st.markdown("<h2>Add Friends via Voice</h2>", unsafe_allow_html=True)
-        st.markdown(f"<h3>Currently Enrolled: {len(st.session_state.students)}</h3>", unsafe_allow_html=True)
-        
-        voice_student_id = st.session_state.get('stt_s_key', 0)
-        transcript = speech_to_text(key=f"voice_student_{voice_student_id}")
-        
-        if transcript:
-            if transcript == "ERROR_NOT_SUPPORTED": st.error("Browser unsupported.")
-            else:
-                t = transcript.lower()
-                words = t.split()
-                name = "Unknown"
-                if "name is" in t:
-                    try:
-                        idx = words.index("is")
-                        if idx + 1 < len(words): name = words[idx + 1].replace(',', '').replace('.', '').capitalize()
-                    except ValueError: pass
-                elif len(words) > 0:
-                    name = words[0].replace(',', '').replace('.', '').capitalize()
+                    words = t_clean.split()
+                    name = words[0].capitalize() if words else "Unknown"
                     
                 age = 12
-                for w in words:
-                    cand = ''.join(filter(str.isdigit, w))
-                    if cand:
-                        age = int(cand)
-                        break
+                nums = re.findall(r'\d+', t_clean)
+                if nums:
+                    age = int(nums[0])
                         
                 level = "Beginner"
                 goal = "Basic Literacy"
@@ -551,10 +518,71 @@ def render_a11y_mode():
                 new_st = {"name": name, "age": age, "level": level, "goal": goal}
                 st.session_state.students.append(new_st)
                 
-                st.session_state.speak_queue = f"Transcribed successfully. Added {name}, age {age}."
-                st.session_state.stt_s_key = voice_student_id + 1
-                st.rerun()
+                st.session_state.speak_queue = f"Captured {name}, age {age}."
+                processed = True
                 
+        if processed:
+            st.session_state.stt_global_key = voice_global_id + 1
+            st.rerun()
+
+    st.divider()
+    step = st.session_state.a11y_step
+    
+    if step == 0:
+        if 'spoken_welcome' not in st.session_state:
+            st.session_state.speak_queue = "Welcome to the Voice Wizard. Tap the massive center microphone and say Begin aloud."
+            st.session_state.spoken_welcome = True
+            st.rerun()
+            
+        if st.button("🚀 Or Click: Begin", type="primary", use_container_width=True):
+            st.session_state.a11y_step = 1
+            st.session_state.speak_queue = "Say your data limit."
+            st.rerun()
+            
+    elif step == 1:
+        st.markdown("<h2>Manual Failsafe Backup:</h2>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("500 MB", type="primary", use_container_width=True):
+                st.session_state.a11y_budget = 500
+                st.session_state.a11y_step = 2
+                st.session_state.speak_queue = "Limit set. State student profile."
+                st.rerun()
+        with col2:
+            if st.button("1 GB", type="primary", use_container_width=True):
+                st.session_state.a11y_budget = 1024
+                st.session_state.a11y_step = 2
+                st.session_state.speak_queue = "Limit set. State student profile."
+                st.rerun()
+        with col3:
+            if st.button("2 GB", type="primary", use_container_width=True):
+                st.session_state.a11y_budget = 2048
+                st.session_state.a11y_step = 2
+                st.session_state.speak_queue = "Limit set. State student profile."
+                st.rerun()
+
+    elif step == 2:
+        st.markdown("<h2>Adding Friends</h2>", unsafe_allow_html=True)
+        st.markdown(f"<h3>Currently Enrolled: {len(st.session_state.students)}</h3>", unsafe_allow_html=True)
+        
+        st.markdown("<h2>Manual Failsafe Backup:</h2>", unsafe_allow_html=True)
+        cA, cB, cC = st.columns(3)
+        with cA:
+            if st.button("➕ Add Beginner (Age 8)", type="primary", use_container_width=True):
+                st.session_state.students.append({"name": f"Beginner {len(st.session_state.students)+1}", "age": 8, "level": "Beginner", "goal": "Basic Literacy"})
+                st.session_state.speak_queue = "Added Beginner Level Friend."
+                st.rerun()
+        with cB:
+            if st.button("➕ Add Learner (Age 13)", type="primary", use_container_width=True):
+                st.session_state.students.append({"name": f"Learner {len(st.session_state.students)+1}", "age": 13, "level": "Intermediate", "goal": "Concept Building"})
+                st.session_state.speak_queue = "Added Intermediate Learner Friend."
+                st.rerun()
+        with cC:
+            if st.button("➕ Add Scholar (Age 17)", type="primary", use_container_width=True):
+                st.session_state.students.append({"name": f"Scholar {len(st.session_state.students)+1}", "age": 17, "level": "Advanced", "goal": "Exam Preparation"})
+                st.session_state.speak_queue = "Added Advanced Scholar Friend."
+                st.rerun()
+        
         st.divider()
         if st.button("✅ Calculate Result", type="primary", use_container_width=True):
             st.session_state.a11y_step = 3
@@ -574,6 +602,7 @@ def render_a11y_mode():
         st.markdown(f"<h2>Payload Processed: {global_used_mb} MB / {budget} MB</h2>", unsafe_allow_html=True)
         st.divider()
         st.markdown("<h2>Student Plans Generated</h2>", unsafe_allow_html=True)
+        
         # Compact Voice Output mode
         grid_cols = st.columns(2)
         for i, s in enumerate(st.session_state.students):
@@ -581,19 +610,18 @@ def render_a11y_mode():
             with grid_cols[i % 2]:
                 with st.container(border=True):
                     st.markdown(f"<h2 style='margin: 0;'>{s['name']}</h2>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='color: #8b5cf6; font-weight: 800;'>{res['allocated_mb']} MB</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='color: #8b5cf6; font-weight: 800; font-size:1.5rem; text-align:center;'>{res['allocated_mb']} MB</p>", unsafe_allow_html=True)
                     for key, count in res['plan'].items():
                         if count > 0:
-                            st.markdown(f"<h4>{count}x {CONTENT_LABELS[key]}</h4>", unsafe_allow_html=True)
+                            st.markdown(f"<h4 style='text-align:center;'>{count}x {CONTENT_LABELS[key]}</h4>", unsafe_allow_html=True)
 
         st.markdown("<br><br>", unsafe_allow_html=True)
-        if st.button("🔄 Start Over", use_container_width=True):
+        if st.button("🔄 Start Over", type="primary", use_container_width=True):
             st.session_state.students = []
             st.session_state.a11y_step = 0
             if 'spoken_welcome' in st.session_state: del st.session_state.spoken_welcome
             if 'spoken_results' in st.session_state: del st.session_state.spoken_results
             st.rerun()
-
 
 def main():
     if st.session_state.a11y_mode:
