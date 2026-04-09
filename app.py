@@ -29,7 +29,7 @@ def speak(text):
 
 
 # --- STT COMPONENT INJECTION ---
-_STT_DIR = os.path.join(os.path.dirname(__file__), "stt_component_v6")
+_STT_DIR = os.path.join(os.path.dirname(__file__), "stt_component_v7")
 if not os.path.exists(_STT_DIR):
     os.makedirs(_STT_DIR)
 
@@ -100,7 +100,7 @@ with open(_FILE_PATH, "w", encoding="utf-8") as f:
     f.write(_HTML_CONTENT)
 
 # Bursting cache dynamically
-speech_to_text = components.declare_component("speech_to_text", path=_STT_DIR)
+speech_to_text = components.declare_component("speech_to_text_v7", path=_STT_DIR)
 
 
 # Playful Kids CSS Theme
@@ -258,6 +258,16 @@ if 'a11y_step' not in st.session_state: st.session_state.a11y_step = 0
 if 'a11y_budget' not in st.session_state: st.session_state.a11y_budget = 1024
 if 'speak_queue' not in st.session_state: st.session_state.speak_queue = None
 
+# Draft State for Voice Input Population
+if 'draft_name' not in st.session_state: st.session_state.draft_name = ""
+if 'draft_age' not in st.session_state: st.session_state.draft_age = 12
+if 'draft_level' not in st.session_state: st.session_state.draft_level = "Beginner"
+if 'draft_goal' not in st.session_state: st.session_state.draft_goal = "Basic Literacy"
+if 'draft_budget' not in st.session_state: st.session_state.draft_budget = 1.5
+if 'draft_unit' not in st.session_state: st.session_state.draft_unit = "GB"
+if 'show_verification' not in st.session_state: st.session_state.show_verification = False
+if 'verification_msg' not in st.session_state: st.session_state.verification_msg = ""
+
 if st.session_state.speak_queue:
     speak(st.session_state.speak_queue)
     st.session_state.speak_queue = None
@@ -290,6 +300,61 @@ def render_standard_mode():
             ]
             st.rerun()
 
+    # Voice Dictation block above the rows
+    st.markdown("<div class='kids-header'>🎙️ Quick Voice Entry</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #64748b;'>Speak exactly like: 'Rahul, 12 years, intermediate, exam preparation, 1 GB data'</p>", unsafe_allow_html=True)
+    
+    # We use a container to restrict width of microphone
+    mic_cols = st.columns([1, 4])
+    with mic_cols[0]:
+        voice_dict_id = st.session_state.get('stt_dict_key', 0)
+        transcript = speech_to_text(key=f"voice_dict_{voice_dict_id}")
+        
+    if transcript and transcript != "ERROR_NOT_SUPPORTED":
+        import re
+        t_clean = transcript.lower().replace(",", " ").replace(".", " ")
+        
+        budget = 1.5
+        unit = "GB"
+        m_data = re.search(r'(\d+(?:\.\d+)?)\s*(gb|mb|gigabyte|megabyte|gig|meg)', t_clean)
+        if m_data:
+            budget = float(m_data.group(1))
+            u_str = m_data.group(2)
+            unit = "MB" if "mb" in u_str or "meg" in u_str else "GB"
+            
+        level = "Beginner"
+        if "intermediate" in t_clean: level = "Intermediate"
+        elif "advanced" in t_clean: level = "Advanced"
+        
+        goal = "Basic Literacy"
+        if "concept" in t_clean: goal = "Concept Building"
+        elif "exam" in t_clean: goal = "Exam Preparation"
+        
+        age = 12
+        nums = re.findall(r'\b\d+\b', re.sub(r'\d+(?:\.\d+)?\s*(gb|mb|gigabyte|megabyte)', '', t_clean))
+        if nums: age = int(nums[0])
+        
+        name = ""
+        words = t_clean.split()
+        for w in words:
+            if not re.match(r'\d+', w) and w not in ["years", "year", "age", "old", "level", "goal", "data", "limit", "gb", "mb", "add"]:
+                name = w.capitalize()
+                break
+                
+        st.session_state.draft_name = name
+        st.session_state.draft_age = age
+        st.session_state.draft_level = level
+        st.session_state.draft_goal = goal
+        st.session_state.draft_budget = budget
+        st.session_state.draft_unit = unit
+        st.session_state.show_verification = True
+        st.session_state.verification_msg = f"Extracted successfully: Student {name} with {budget:.1f} {unit} limit."
+        st.session_state.stt_dict_key = voice_dict_id + 1
+        st.rerun()
+
+    if getattr(st.session_state, 'show_verification', False):
+        st.success(st.session_state.verification_msg)
+
     # --- ROW 1 ---
     row1, row2 = st.columns([1, 1.8])
     with row1:
@@ -297,31 +362,41 @@ def render_standard_mode():
         with st.container(border=True):
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
-                data_budget = st.number_input("Limit", min_value=0.0, step=0.1, value=1.5, format="%.2f", key="budget")
+                data_budget_val = st.number_input("Limit", min_value=0.0, step=0.1, value=st.session_state.draft_budget, format="%.2f", key="budget_input_v")
             with col_b2:
-                unit = st.selectbox("Unit", ["GB", "MB"])
-            
-            total_mb = data_budget * 1024 if unit == "GB" else data_budget
+                idx_unit = 0 if st.session_state.draft_unit == "GB" else 1
+                unit_val = st.selectbox("Unit", ["GB", "MB"], index=idx_unit, key="unit_input_v")
+                
+            total_mb = data_budget_val * 1024 if unit_val == "GB" else data_budget_val
             st.markdown(f"<p style='margin-top: 5px; margin-bottom: 10px; font-weight: 800; font-size: 1.1rem; color: #3b82f6;'>Total Data: {total_mb:.0f} MB</p>", unsafe_allow_html=True)
-            user_toggled_low_data = st.toggle("🚀 Turbo Saving Mode", value=False)
+            
+            # Synchronize toggle visibility state by computing threshold early
+            _raw_demand = calculate_unrestricted_demand(st.session_state.students)
+            _is_overloaded = (_raw_demand > total_mb) and (total_mb > 0)
+            
+            user_toggled_low_data = st.toggle("🚀 Turbo Saving Mode", value=_is_overloaded)
             
     with row2:
         st.markdown("<div class='kids-header'>👦 Add Friends</div>", unsafe_allow_html=True)
-        with st.form("add_student_form", clear_on_submit=True):
+        with st.form("add_student_form", clear_on_submit=False):
             c0, c1, c2, c3 = st.columns([2, 1, 1.5, 1.5])
             with c0:
-                name = st.text_input("Name", placeholder="e.g. Rahul")
+                name_val = st.text_input("Name", value=st.session_state.draft_name)
             with c1:
-                age = st.number_input("Age", min_value=3, max_value=100, step=1, value=12)
+                age_val = st.number_input("Age", min_value=3, max_value=100, step=1, value=st.session_state.draft_age)
             with c2:
-                level = st.selectbox("Level", ["Beginner", "Intermediate", "Advanced"])
+                idx_l = ["Beginner", "Intermediate", "Advanced"].index(st.session_state.draft_level)
+                level_val = st.selectbox("Level", ["Beginner", "Intermediate", "Advanced"], index=idx_l)
             with c3:
-                goal = st.selectbox("Goal", ["Basic Literacy", "Concept Building", "Exam Preparation"])
+                idx_g = ["Basic Literacy", "Concept Building", "Exam Preparation"].index(st.session_state.draft_goal)
+                goal_val = st.selectbox("Goal", ["Basic Literacy", "Concept Building", "Exam Preparation"], index=idx_g)
             
-            submitted = st.form_submit_button("✨ Add to Dashboard!", use_container_width=True)
+            submitted = st.form_submit_button("✨ Confirm & Add!", use_container_width=True)
             if submitted:
-                s_name = name if name.strip() != "" else f"Friend {len(st.session_state.students) + 1}"
-                st.session_state.students.append({"name": s_name, "age": age, "level": level, "goal": goal})
+                s_name = name_val if name_val.strip() != "" else f"Friend {len(st.session_state.students) + 1}"
+                st.session_state.students.append({"name": s_name, "age": age_val, "level": level_val, "goal": goal_val})
+                st.session_state.show_verification = False
+                st.session_state.draft_name = ""
                 st.rerun()
 
     # --- ROW 2 ---
@@ -399,7 +474,7 @@ def render_standard_mode():
                 html_tags = []
                 for key, count in res['plan'].items():
                     if count > 0:
-                        html_tags.append(f"<span class='content-tag tag-{key}' style='padding: 4px 10px; font-size: 0.8rem; margin: 0;'>{count}x {CONTENT_LABELS[key]}</span>")
+                        html_tags.append(f"<span class='content-tag tag-{key}' style='padding: 4px 10px; font-size: 0.8rem; margin: 0;'>{count} {CONTENT_LABELS[key]}</span>")
                 
                 tags_str = "<div style='display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;'>" + "".join(html_tags) + "</div>" if html_tags else "<span style='color:#e03131; font-weight: 800;'>Oh no! Not enough data to play!</span>"
                 
@@ -613,7 +688,7 @@ def render_a11y_mode():
                     st.markdown(f"<p style='color: #8b5cf6; font-weight: 800; font-size:1.5rem; text-align:center;'>{res['allocated_mb']} MB</p>", unsafe_allow_html=True)
                     for key, count in res['plan'].items():
                         if count > 0:
-                            st.markdown(f"<h4 style='text-align:center;'>{count}x {CONTENT_LABELS[key]}</h4>", unsafe_allow_html=True)
+                            st.markdown(f"<h4 style='text-align:center;'>{count} {CONTENT_LABELS[key]}</h4>", unsafe_allow_html=True)
 
         st.markdown("<br><br>", unsafe_allow_html=True)
         if st.button("🔄 Start Over", type="primary", use_container_width=True):
